@@ -1,0 +1,141 @@
+package com.example.pfe;
+
+import android.util.Log;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+
+import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.firebase.ui.database.FirebaseRecyclerAdapter;
+import com.firebase.ui.database.FirebaseRecyclerOptions;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+
+public class MessageAdapter extends FirebaseRecyclerAdapter<Message, MessageAdapter.MessageViewHolder> {
+
+    private static final int VIEW_TYPE_SENT = 1;
+    private static final int VIEW_TYPE_RECEIVED = 2;
+
+    private final String currentUserId;
+    private final DatabaseReference usersRef;
+
+    public MessageAdapter(@NonNull FirebaseRecyclerOptions<Message> options, String currentUserId) {
+        super(options);
+        this.currentUserId = currentUserId;
+        this.usersRef = FirebaseDatabase.getInstance().getReference("utilisateurs").child("etudiants");
+    }
+
+    @Override
+    public int getItemViewType(int position) {
+        Message message = getItem(position);
+        if (message != null && message.getSenderId() != null && message.getSenderId().equals(currentUserId)) {
+            return VIEW_TYPE_SENT;
+        }
+        return VIEW_TYPE_RECEIVED;
+    }
+
+    @NonNull
+    @Override
+    public MessageViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View view;
+        if (viewType == VIEW_TYPE_SENT) {
+            view = LayoutInflater.from(parent.getContext())
+                    .inflate(R.layout.item_message_sent, parent, false);
+        } else {
+            view = LayoutInflater.from(parent.getContext())
+                    .inflate(R.layout.item_message_received, parent, false);
+        }
+        return new MessageViewHolder(view, viewType);
+    }
+
+    @Override
+    protected void onBindViewHolder(@NonNull MessageViewHolder holder, int position, @NonNull Message message) {
+        holder.bind(message);
+    }
+
+    class MessageViewHolder extends RecyclerView.ViewHolder {
+        private final TextView messageText;
+        private final TextView senderName;
+        private final TextView messageTime;
+        private final int viewType;
+
+        public MessageViewHolder(@NonNull View itemView, int viewType) {
+            super(itemView);
+            this.viewType = viewType;
+
+            if (viewType == VIEW_TYPE_SENT) {
+                messageText = itemView.findViewById(R.id.sent_message_text);
+                messageTime = itemView.findViewById(R.id.sent_message_time);
+                senderName = null;
+            } else {
+                messageText = itemView.findViewById(R.id.received_message_text);
+                senderName = itemView.findViewById(R.id.received_message_sender);
+                messageTime = itemView.findViewById(R.id.received_message_time);
+            }
+        }
+
+        public void bind(Message message) {
+            // Texte du message
+            messageText.setText(message.getText() != null ? message.getText() : "");
+
+            // Heure du message
+            if (message.getTimestamp() != null) {
+                messageTime.setText(formatTimestamp(message.getTimestamp()));
+            }
+
+            // Pour les messages reçus
+            if (viewType == VIEW_TYPE_RECEIVED && senderName != null) {
+                if (message.getSenderName() != null && !message.getSenderName().isEmpty()) {
+                    senderName.setText(message.getSenderName());
+                    Log.d("MessageAdapter", "Nom trouvé dans message: " + message.getSenderName());
+                } else {
+                    loadSenderName(message.getSenderId());
+                }
+            }
+        }
+
+        private void loadSenderName(String senderId) {
+            if (senderId == null) {
+                if (senderName != null) senderName.setText("Utilisateur");
+                return;
+            }
+
+            usersRef.child(senderId).addListenerForSingleValueEvent(new ValueEventListener() {
+                @Override
+                public void onDataChange(@NonNull DataSnapshot snapshot) {
+                    if (snapshot.exists() && senderName != null) {
+                        String prenom = snapshot.child("prenom").getValue(String.class);
+                        String nom = snapshot.child("nom").getValue(String.class);
+                        String fullName = (prenom != null ? prenom : "") + " " + (nom != null ? nom : "");
+                        fullName = fullName.trim();
+
+                        senderName.setText(!fullName.isEmpty() ? fullName : "Utilisateur");
+                        Log.d("MessageAdapter", "Nom chargé depuis Firebase: " + fullName);
+                    } else if (senderName != null) {
+                        senderName.setText("Utilisateur");
+                    }
+                }
+
+                @Override
+                public void onCancelled(@NonNull DatabaseError error) {
+                    if (senderName != null) senderName.setText("Utilisateur");
+                    Log.e("MessageAdapter", "Erreur chargement nom", error.toException());
+                }
+            });
+        }
+
+        private String formatTimestamp(long timestamp) {
+            return new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(timestamp));
+        }
+    }
+}
